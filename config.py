@@ -14,10 +14,10 @@ class ModelConfig:
 
 _CONFIGS: dict[str, ModelConfig] = {
     # ── AWS g4dn.xlarge (T4 16GB) ──────────────────────────────────────────
-    # EXAONE-3.5-2.4B-Instruct: LG AI, LLaMA 기반, 한국어 강세
-    # GPU fp16 → VRAM ~2.5GB, T4에서 매우 여유 있음
+    # Qwen2.5-3B-Instruct: 한국어 강세, 표준 아키텍처 (커스텀 코드 없음)
+    # GPU fp16 → VRAM ~3GB, T4에서 여유 있음
     "cloud": ModelConfig(
-        model_name="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct",
+        model_name="Qwen/Qwen2.5-3B-Instruct",
         load_in_4bit=False,
         device_map="auto",
         torch_dtype="float16",
@@ -25,7 +25,7 @@ _CONFIGS: dict[str, ModelConfig] = {
     # ── 로컬 개발 / CPU 환경 ────────────────────────────────────────────────
     # 동일 모델 → hook 레이어 번호 cloud와 완전히 일치
     "local": ModelConfig(
-        model_name="LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct",
+        model_name="Qwen/Qwen2.5-3B-Instruct",
         load_in_4bit=False,
         device_map="cpu",
         torch_dtype="float32",

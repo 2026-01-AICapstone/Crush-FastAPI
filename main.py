@@ -26,7 +26,6 @@ async def lifespan(app: FastAPI):
 
     load_kwargs: dict = {
         "device_map": cfg.device_map,
-        "trust_remote_code": True,  # EXAONE 필수
     }
 
     dtype = torch.float32 if cfg.torch_dtype == "float32" else torch.float16
