@@ -1,0 +1,24 @@
+# ── AWS g4dn.xlarge (T4 GPU 16GB) 전용 ──────────────────────────────────────
+# MODEL_MODE=cloud → EXAONE-3.5-7.8B-Instruct, INT4 양자화 (bitsandbytes)
+FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 \
+    python3.11-dev \
+    python3-pip \
+    gcc \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -s /usr/bin/python3.11 /usr/bin/python
+
+COPY requirements.cloud.txt requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+ENV HF_HOME=/app/.cache/huggingface
+ENV MODEL_MODE=cloud
+
+EXPOSE 8000
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

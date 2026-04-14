@@ -5,32 +5,41 @@ from typing import Literal
 import torch
 from fastapi import FastAPI
 from pydantic import BaseModel
-from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+from config import get_config
 
 # ─── 모델 로딩 ────────────────────────────────────────────────────────────────
 
-MODEL_NAME = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
-_pipe = None
+_model = None
+_tokenizer = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _pipe
-    print(f"[startup] Loading model: {MODEL_NAME}")
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-    model = AutoModelForCausalLM.from_pretrained(
-        MODEL_NAME,
-        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-        device_map="auto",
-    )
-    _pipe = pipeline(
-        "text-generation",
-        model=model,
-        tokenizer=tokenizer,
-    )
+    global _model, _tokenizer
+    cfg = get_config()
+
+    print(f"[startup] Loading model: {cfg.model_name}")
+
+    _tokenizer = AutoTokenizer.from_pretrained(cfg.model_name)
+
+    load_kwargs: dict = {
+        "device_map": cfg.device_map,
+        "trust_remote_code": True,  # EXAONE 필수
+    }
+
+    dtype = torch.float32 if cfg.torch_dtype == "float32" else torch.float16
+    load_kwargs["torch_dtype"] = dtype
+
+    _model = AutoModelForCausalLM.from_pretrained(cfg.model_name, **load_kwargs)
+    _model.eval()
+
     print("[startup] Model ready")
     yield
-    _pipe = None
+
+    _model = None
+    _tokenizer = None
 
 
 app = FastAPI(lifespan=lifespan)
@@ -63,7 +72,11 @@ class ChatResponse(BaseModel):
 
 # ─── 추론 ─────────────────────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = "You are a helpful assistant."
+SYSTEM_PROMPT = (
+    "당신은 공감 능력이 뛰어난 정신건강 상담 보조 AI입니다. "
+    "사용자의 이야기를 경청하고 따뜻하고 안전하게 응답하세요."
+)
+
 
 def build_messages(request: ChatRequest) -> list[dict]:
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
@@ -74,21 +87,31 @@ def build_messages(request: ChatRequest) -> list[dict]:
 
 
 def generate(messages: list[dict]) -> str:
-    tokenizer = _pipe.tokenizer
-    prompt = tokenizer.apply_chat_template(
-        messages, tokenize=False, add_generation_prompt=True
+    input_ids = _tokenizer.apply_chat_template(
+        messages,
+        tokenize=True,
+        add_generation_prompt=True,
+        return_tensors="pt",
     )
-    output = _pipe(
-        prompt,
-        max_new_tokens=512,
-        do_sample=True,
-        temperature=0.7,
-        top_p=0.9,
-        pad_token_id=tokenizer.eos_token_id,
-    )
-    generated = output[0]["generated_text"]
-    # 프롬프트 이후 생성된 텍스트만 추출
-    return generated[len(prompt):].strip()
+
+    # 모델과 같은 디바이스로 이동
+    device = next(_model.parameters()).device
+    input_ids = input_ids.to(device)
+
+    with torch.no_grad():
+        output_ids = _model.generate(
+            input_ids,
+            max_new_tokens=512,
+            do_sample=True,
+            temperature=0.7,
+            top_p=0.9,
+            eos_token_id=_tokenizer.eos_token_id,
+            pad_token_id=_tokenizer.eos_token_id,
+        )
+
+    # 입력 토큰 이후 생성 부분만 디코딩
+    new_tokens = output_ids[0][input_ids.shape[-1]:]
+    return _tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
 
 
 # ─── 엔드포인트 ───────────────────────────────────────────────────────────────
@@ -101,7 +124,8 @@ async def chat(request: ChatRequest):
     elapsed_ms = int((time.time() - start) * 1000)
 
     # baseline 모드: risk 계산 없음
-    # safety 모드: TODO — 실제 모델 적용 후 danger_vector.pt 로드해서 코사인 유사도 계산
+    # safety 모드: TODO — AI팀에게 danger_vector.pt + 레이어 번호 받은 후
+    #              PyTorch forward hook으로 activation 추출 → 코사인 유사도 계산
     return ChatResponse(
         session_id=request.session_id,
         risk_score=0.0,
@@ -116,4 +140,9 @@ async def chat(request: ChatRequest):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "model": MODEL_NAME}
+    from config import MODEL_MODE
+    return {
+        "status": "ok",
+        "mode": MODEL_MODE,
+        "model": get_config().model_name,
+    }

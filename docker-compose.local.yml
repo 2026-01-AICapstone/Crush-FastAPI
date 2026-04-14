@@ -1,0 +1,14 @@
+services:
+  ai-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.local
+    ports:
+      - "8000:8000"
+    environment:
+      - MODEL_MODE=local
+    volumes:
+      - hf_cache:/app/.cache/huggingface  # 모델 캐시 유지 (재시작 시 재다운로드 방지)
+
+volumes:
+  hf_cache:
